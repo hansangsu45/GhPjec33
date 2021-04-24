@@ -1,0 +1,128 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading;
+using System;
+
+public class Client3 : MonoBehaviour
+{
+    private string nickname="";
+    public Text chatTxt;
+    public InputField chatInput;
+    private string receivedMsg="";
+
+    [SerializeField] string strIP = "127.0.0.1";
+    [SerializeField] string broadcastIP = "230.185.192.108";
+    [SerializeField] string multicastIP = "229.1.1.229";
+    [SerializeField] int port = 13000;
+    private byte[] rB = new byte[10000];  // 버퍼의 크기 필요한 만큼 크기를 정하도록 하자 작을수록 좋음
+    Thread ServerCheck_thread;  // 서버에서 보내는 패킷을 체크하기 위한 스레드
+    Queue<string> netBuffer = new Queue<string>();  // 버퍼를 저장하기 위한 큐
+    private Socket client;  // 소켓(클라)
+    private IPAddress ip;
+    private IPEndPoint endPoint;
+
+    object buffer_lock = new object();  //Queue 처리 충돌 방지용 lock
+    private readonly string connectCode = "%FirstConnectToServerCHECKTPU5570001";
+
+    private void Start()
+    {
+        ServerOn();
+        StartCoroutine(buffer_updata());  //업데이트에서 안하는 것은 많은 패킷이 오면 렉을 유발해서
+    }
+
+    IEnumerator buffer_updata()
+    {
+        while(true)
+        {
+            yield return null;
+            BufferSystem();
+        }
+    }
+
+    private void ServerOn()
+    {
+        client = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        ip = IPAddress.Parse(strIP);
+        endPoint = new IPEndPoint(ip, port);
+
+        IPAddress multicIP = IPAddress.Parse(multicastIP);
+        client.SetSocketOption(SocketOptionLevel.IP, SocketOptionName.AddMembership, new MulticastOption(multicIP,ip));
+        
+        client.Connect(endPoint);
+        ServerCheck_thread = new Thread(ServerCheck);
+        ServerCheck_thread.Start(); // 서버 체크 시스템 시작, 스레드를 사용하지않으면 서버체크 Receive 에서 유니티가 멈춰버림
+        ServerSend(connectCode);
+    }
+
+    private void ServerCheck()
+    {
+        while(true)
+        {
+            try
+            {
+                client.Receive(rB, 0, rB.Length, SocketFlags.None);  //서버에서 온 패킷을 버퍼에 담기
+                string t = Encoding.UTF8.GetString(rB);  //큐에 버퍼를 넣을 준비
+                t = t.Replace("\0", string.Empty);  //버퍼 마지막에 공백이 있는지 검사하고 공백 삭제
+                lock(buffer_lock)  //queue 충돌 방지
+                {
+                    netBuffer.Enqueue(t);  //큐에 버퍼 저장
+                }
+                Array.Clear(rB, 0, rB.Length);  //버퍼를 사용후 초기화
+            }
+            catch(Exception e)
+            {
+                chatTxt.text += "\n" + e.Message;
+            }
+        }
+    }
+
+    private void BufferSystem()
+    {
+        while (netBuffer.Count != 0)
+        {
+            receivedMsg = netBuffer.Dequeue();
+            chatTxt.text += "\n" + receivedMsg;
+            receivedMsg = "";
+        }
+    }
+
+    private void ServerSend(string str)
+    {
+        byte[] sbuff = Encoding.UTF8.GetBytes(str);
+        client.Send(sbuff, 0, sbuff.Length,SocketFlags.None);
+    }
+
+    public void Send()
+    {
+        string msg = nickname + ": " + chatInput.text;
+        if(msg.Contains(connectCode))
+        {
+            chatInput.text = "";
+            return;
+        }
+
+        ServerSend(msg);
+        chatInput.text = "";
+    }
+
+    public void SetNick(InputField inputf) => nickname = inputf.text;
+
+    private void Update()
+    {
+        if(Input.GetKeyDown(KeyCode.Return))
+        {
+            Send();
+        }
+    }
+
+    private void OnApplicationQuit()
+    {
+        ServerCheck_thread.Abort();  //스레드 종료
+        client.Close();
+    }
+}
