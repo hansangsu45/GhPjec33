@@ -1,0 +1,63 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class PlayerMove : MonoBehaviour
+{
+    public float speed = 10f;
+    public int id;
+    public Client3 client;
+    private int sendSeconds = 10;
+
+    private void Start()
+    {
+        StartCoroutine(MoveSync());
+    }
+
+    IEnumerator MoveSync()
+    {
+        yield return new WaitForSeconds(1);
+        while(true)
+        {
+            if (client.id == id)
+            {
+                float t = 1f / (float)sendSeconds;
+                yield return new WaitForSeconds(t);
+                client.PlayerPositionSend(transform.position.x, transform.position.y, transform.position.z);
+            }
+        }
+    }
+
+    private void Update()
+    {
+        if (client.id == id)
+        {
+            Move();
+            InputKey();
+        }
+    }
+
+    void ShowUI()=> client.fText.text = sendSeconds.ToString();
+
+    void InputKey()
+    {
+        if (Input.GetKeyDown(KeyCode.P))
+        {
+            sendSeconds++;
+            ShowUI();
+        }
+        else if (Input.GetKeyDown(KeyCode.L))
+        {
+            sendSeconds--;
+            ShowUI();
+        }
+    }
+
+    private void Move()
+    {
+        float x = Input.GetAxisRaw("Horizontal");
+        float z = Input.GetAxisRaw("Vertical");
+        Vector3 moveVec = new Vector3(x, 0, z).normalized;
+        transform.position += moveVec * speed * Time.deltaTime;
+    }
+}

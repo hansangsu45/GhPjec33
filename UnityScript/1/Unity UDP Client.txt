@@ -27,7 +27,18 @@ public class Client3 : MonoBehaviour
     private IPEndPoint endPoint;
 
     object buffer_lock = new object();  //Queue 처리 충돌 방지용 lock
+    #region 서버코드
     private readonly string connectCode = "%FirstConnectToServerCHECKTPU5570001";
+    private readonly string connectCode2 = "%FirstConnectToServerCHECKTPU55700012";
+    private readonly string positionCode = "%PlayerPositionAsyn677RTV_+";
+    private readonly string discntCode = "%PlayerDisCnt5Y9O";
+    private readonly string othersCode = "%YDOTHER-";
+    #endregion
+    public int id;
+    private PlayerMove player=null;
+    private Dictionary<int, PlayerMove> playerDict = new Dictionary<int, PlayerMove>();
+    public GameObject playerPrefab;
+    public Text fText;
 
     private void Start()
     {
@@ -86,9 +97,82 @@ public class Client3 : MonoBehaviour
         while (netBuffer.Count != 0)
         {
             receivedMsg = netBuffer.Dequeue();
-            chatTxt.text += "\n" + receivedMsg;
-            receivedMsg = "";
+            if (!MsgCodeInspect(receivedMsg))
+            {
+                chatTxt.text += "\n" + receivedMsg;
+                receivedMsg = "";
+            }
         }
+    }
+
+    private bool MsgCodeInspect(string m="")
+    {
+        if (receivedMsg.Contains("|"))
+        {
+            if (receivedMsg.Split('|')[1] == connectCode)
+            {
+                chatTxt.text += "\n" + receivedMsg.Split('|')[0];
+                id = int.Parse(receivedMsg.Split('|')[2]);
+                receivedMsg = "";
+
+                GameObject o = Instantiate(playerPrefab, Vector3.zero, Quaternion.identity);
+                PlayerMove p = o.GetComponent<PlayerMove>();
+                player = p;
+                player.client = this;
+                player.id = id;
+                playerDict.Add(id, player);
+
+                return true;
+            }
+            else if (receivedMsg.Split('|')[1] == connectCode2)
+            {
+                chatTxt.text += "\n" + receivedMsg.Split('|')[0];
+                int _id = int.Parse(receivedMsg.Split('|')[2]);
+                receivedMsg = "";
+
+                GameObject o = Instantiate(playerPrefab, Vector3.zero, Quaternion.identity);
+                PlayerMove p = o.GetComponent<PlayerMove>();
+                p.id = _id;
+                playerDict.Add(_id, p);
+
+                string msg = $"{othersCode}|{_id}|{player.transform.position.x}|{player.transform.position.y}|{player.transform.position.z}|{id}";
+                ServerSend(msg);
+
+                return true;
+            }
+            else if(m.Contains(discntCode))
+            {
+                int _id = int.Parse(m.Split('|')[1]);
+                GameObject o = playerDict[_id].gameObject;
+                playerDict.Remove(_id);
+                Destroy(o);
+
+                return true;
+            }
+            else if (m.Split('|')[0] == positionCode)
+            {
+                if (id == int.Parse(m.Split('|')[4])) return true;
+
+                playerDict[int.Parse(m.Split('|')[4])].transform.position = new Vector3(float.Parse(m.Split('|')[1]), float.Parse(m.Split('|')[2]), float.Parse(m.Split('|')[3]));
+                
+                return true;
+            }
+            else if(m.Split('|')[0]==othersCode)
+            {
+                string[] strs = m.Split('|');
+                if (int.Parse(strs[1])==id)
+                {
+                    GameObject o = Instantiate(playerPrefab, new Vector3(float.Parse(strs[2]), float.Parse(strs[3]), float.Parse(strs[4])), Quaternion.identity);
+                    PlayerMove p = o.GetComponent<PlayerMove>();
+                    p.id = int.Parse(strs[5]);
+                    playerDict.Add(p.id, p);
+                }
+                return true;
+            }
+            
+            return false;
+        }
+        return false;
     }
 
     private void ServerSend(string str)
@@ -100,7 +184,7 @@ public class Client3 : MonoBehaviour
     public void Send()
     {
         string msg = nickname + ": " + chatInput.text;
-        if(msg.Contains(connectCode))
+        if(msg.Contains(connectCode) || msg.Contains(positionCode) || msg.Contains(othersCode) || msg.Contains(discntCode))
         {
             chatInput.text = "";
             return;
@@ -108,6 +192,12 @@ public class Client3 : MonoBehaviour
 
         ServerSend(msg);
         chatInput.text = "";
+    }
+
+    public void PlayerPositionSend(float x,float y ,float z)
+    {
+        string msg = $"{positionCode}|{x}|{y}|{z}|{id}";
+        ServerSend(msg);
     }
 
     public void SetNick(InputField inputf) => nickname = inputf.text;
@@ -118,10 +208,15 @@ public class Client3 : MonoBehaviour
         {
             Send();
         }
+        else if(Input.GetKeyDown(KeyCode.R))
+        {
+            chatTxt.text = "";
+        }
     }
 
     private void OnApplicationQuit()
     {
+        ServerSend(discntCode+"|"+id.ToString());
         ServerCheck_thread.Abort();  //스레드 종료
         client.Close();
     }
